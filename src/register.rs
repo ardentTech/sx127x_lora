@@ -53,6 +53,16 @@ pub enum IRQ {
     IrqRxDoneMask = 0x40,
 }
 
+#[derive(Clone, Copy)]
+pub enum Interrupt {
+    //RxDone,
+    TxDone = 0x40,
+}
+
+pub enum DioMask {
+    Dio0 = 0xc0,
+}
+
 impl Register {
     pub fn addr(self) -> u8 {
         self as u8

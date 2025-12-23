@@ -19,6 +19,7 @@ mod register;
 use self::register::PaConfig;
 use self::register::Register;
 use self::register::IRQ;
+pub use self::register::Interrupt;
 
 /// Provides the necessary SPI mode configuration for the radio
 pub const MODE: Mode = Mode {
@@ -44,7 +45,7 @@ pub enum Sx127xError<SPI, RESET> {
     Transmitting,
 }
 
-use crate::register::{FskDataModulationShaping, FskRampUpRamDown};
+use crate::register::{DioMask, FskDataModulationShaping, FskRampUpRamDown};
 use Sx127xError::*;
 
 #[cfg(not(feature = "version_0x09"))]
@@ -136,11 +137,39 @@ where
         }
     }
 
+    // TODO docu
     pub fn reset(&mut self) -> Result<(), Sx127xError<SPI::Error, <RESET as ErrorType>::Error>> {
         self.reset.set_low().map_err(Reset)?;
         self.spi.transaction(&mut [Operation::DelayNs(10_000_000)]).map_err(SPI)?;
         self.reset.set_high().map_err(Reset)?;
         self.spi.transaction(&mut [Operation::DelayNs(10_000_000)]).map_err(SPI)?;
+        Ok(())
+    }
+
+    // TODO docu
+    // TODO not happy with so much casting
+    pub fn clear_interrupt(&mut self, interrupt: Interrupt) -> Result<(), Sx127xError<SPI::Error, <RESET as ErrorType>::Error>> {
+        match interrupt {
+            Interrupt::TxDone => {
+                let mut reg_val = self.read_register(Register::RegIrqFlags.addr())?;
+                reg_val &= !(IRQ::IrqTxDoneMask as u8);
+                reg_val |= 0x08 & (IRQ::IrqTxDoneMask as u8); // TODO not happy with 0x08
+                self.write_register(Register::RegIrqFlags.addr(), reg_val)?;
+            }
+        }
+        Ok(())
+    }
+
+    // TODO docu
+    pub fn enable_interrupt(&mut self, interrupt: Interrupt) -> Result<(), Sx127xError<SPI::Error, <RESET as ErrorType>::Error>> {
+        match interrupt {
+            Interrupt::TxDone => {
+                let mut reg_val = self.read_register(Register::RegDioMapping1.addr())?;
+                reg_val &= !(DioMask::Dio0 as u8);
+                reg_val |= (interrupt as u8) & (DioMask::Dio0 as u8);
+                self.write_register(Register::RegDioMapping1.addr(), reg_val)?;
+            }
+        }
         Ok(())
     }
 
@@ -194,7 +223,6 @@ where
                         break packet_ready;
                     }
                     count += 1;
-                    // delay.delay_ms(1);
                     self.spi.transaction(&mut [Operation::DelayNs(1_000_000)]).map_err(SPI)?;
 
                 };
@@ -207,7 +235,6 @@ where
             }
             None => {
                 while !self.read_register(Register::RegIrqFlags.addr())?.get_bit(6) {
-                    // delay.delay_ms(100);
                     self.spi.transaction(&mut [Operation::DelayNs(100_000_000)]).map_err(SPI)?;
 
                 }
@@ -617,9 +644,8 @@ mod tests {
     use crate::RadioMode::{LongRangeMode, Sleep, Stdby};
     use super::*;
 
-    #[test]
-    fn new_ok() {
-        let mut spi = SpiMock::new(&[
+    fn setup() -> [embedded_hal_mock::eh1::spi::Transaction<u8>; 51] {
+        [
             // reset
             SpiTransaction::transaction_start(),
             SpiTransaction::delay(10_000_000),
@@ -680,7 +706,12 @@ mod tests {
             SpiTransaction::transaction_start(),
             SpiTransaction::write_vec([Register::RegOpMode.addr() | 0x80, LongRangeMode.addr() | Stdby.addr()].to_vec()),
             SpiTransaction::transaction_end(),
-        ]);
+        ]
+    }
+
+    #[test]
+    fn new_ok() {
+        let mut spi = SpiMock::new(&setup());
         let mut reset_pin = PinMock::new(&[
             PinTransaction::set(PinState::Low),
             PinTransaction::set(PinState::High),
