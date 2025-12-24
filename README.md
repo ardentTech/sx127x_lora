@@ -15,10 +15,11 @@ would be more efficient if instead an interrupt was connected to the module's DI
 support is available in `embedded-hal`, then this will be added. It is possible to implement this function on a
 device-to-device basis by retrieving a packet with the `read_packet()` function.
 
+### Tests
+From the root dir: `$ cargo test`
+
 ## TODO
-* Implement DIO_0 interrupt
 * Add async support
-* Unit tests
 
 ## Contributing
 Unless you explicitly state otherwise, any contribution intentionally submitted for inclusion in the work by you, as defined in the Apache-2.0 license, shall be dual licensed as above, without any additional terms or conditions.

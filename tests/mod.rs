@@ -1,18 +1,16 @@
 extern crate core;
 
-use embedded_hal::spi::ErrorKind;
 use sx127x_lora::*;
 use sx127x_lora::Sx127xError::VersionMismatch;
 use sx127x_lora::Register;
 
 use embedded_hal_mock::eh1::digital::{Mock as PinMock, State as PinState, Transaction as PinTransaction};
-use embedded_hal_mock::eh1::MockError;
 use embedded_hal_mock::eh1::spi::{Mock as SpiMock, Transaction as SpiTransaction};
 use crate::RadioMode::{LongRangeMode, Sleep, Stdby};
 
-// TODO use a macro?
-fn setup() -> [embedded_hal_mock::eh1::spi::Transaction<u8>; 51] {
-    [
+#[test]
+fn clear_interrupt_ok() {
+    let mut spi = SpiMock::new(&[
         // reset
         SpiTransaction::transaction_start(),
         SpiTransaction::delay(10_000_000),
@@ -73,12 +71,175 @@ fn setup() -> [embedded_hal_mock::eh1::spi::Transaction<u8>; 51] {
         SpiTransaction::transaction_start(),
         SpiTransaction::write_vec([Register::RegOpMode.addr() | 0x80, LongRangeMode.addr() | Stdby.addr()].to_vec()),
         SpiTransaction::transaction_end(),
-    ]
+        // clear interrupt
+        SpiTransaction::transaction_start(),
+        SpiTransaction::transfer([Register::RegIrqFlags.addr(), 0].to_vec(), [0, 0b0101_0101].to_vec()),
+        SpiTransaction::transaction_end(),
+        SpiTransaction::transaction_start(),
+        SpiTransaction::write_vec([Register::RegIrqFlags.addr() | 0x80, 0b0101_1101].to_vec()),
+        SpiTransaction::transaction_end(),
+    ]);
+    let mut reset_pin = PinMock::new(&[
+        PinTransaction::set(PinState::Low),
+        PinTransaction::set(PinState::High),
+    ]);
+    let mut lora = LoRa::new(&mut spi, &mut reset_pin, 915).unwrap();
+    match lora.clear_interrupt(Interrupt::TxDone) {
+        Ok(_) => {},
+        Err(e) => core::panic!("Error: {:?}", e),
+    }
+    reset_pin.done();
+    spi.done();
+}
+
+#[test]
+fn enable_interrupt_ok() {
+    let mut spi = SpiMock::new(&[
+        // reset
+        SpiTransaction::transaction_start(),
+        SpiTransaction::delay(10_000_000),
+        SpiTransaction::transaction_end(),
+        SpiTransaction::transaction_start(),
+        SpiTransaction::delay(10_000_000),
+        SpiTransaction::transaction_end(),
+        // version check
+        SpiTransaction::transaction_start(),
+        SpiTransaction::transfer([Register::RegVersion.addr(), 0].to_vec(), [0, 0x12].to_vec()),
+        SpiTransaction::transaction_end(),
+        // set mode sleep
+        SpiTransaction::transaction_start(),
+        SpiTransaction::transfer([Register::RegModemConfig1.addr(), 0].to_vec(), [0, 0].to_vec()),
+        SpiTransaction::transaction_end(),
+        SpiTransaction::transaction_start(),
+        SpiTransaction::write_vec([Register::RegModemConfig1.addr() | 0x80, 0].to_vec()),
+        SpiTransaction::transaction_end(),
+        SpiTransaction::transaction_start(),
+        SpiTransaction::write_vec([Register::RegOpMode.addr() | 0x80, LongRangeMode.addr() | Sleep.addr()].to_vec()),
+        SpiTransaction::transaction_end(),
+        // set frequency
+        SpiTransaction::transaction_start(),
+        SpiTransaction::write_vec([Register::RegFrfMsb.addr() | 0x80, 0xe4].to_vec()),
+        SpiTransaction::transaction_end(),
+        SpiTransaction::transaction_start(),
+        SpiTransaction::write_vec([Register::RegFrfMid.addr() | 0x80, 0xc0].to_vec()),
+        SpiTransaction::transaction_end(),
+        SpiTransaction::transaction_start(),
+        SpiTransaction::write_vec([Register::RegFrfLsb.addr() | 0x80, 0x0].to_vec()),
+        SpiTransaction::transaction_end(),
+        // clear fifo tx
+        SpiTransaction::transaction_start(),
+        SpiTransaction::write_vec([Register::RegFifoTxBaseAddr.addr() | 0x80, 0x0].to_vec()),
+        SpiTransaction::transaction_end(),
+        // clear fifo rx
+        SpiTransaction::transaction_start(),
+        SpiTransaction::write_vec([Register::RegFifoRxBaseAddr.addr() | 0x80, 0x0].to_vec()),
+        SpiTransaction::transaction_end(),
+        // lna
+        SpiTransaction::transaction_start(),
+        SpiTransaction::transfer([Register::RegLna.addr(), 0].to_vec(), [0, 0x20].to_vec()),
+        SpiTransaction::transaction_end(),
+        SpiTransaction::transaction_start(),
+        SpiTransaction::write_vec([Register::RegLna.addr() | 0x80, 0x23].to_vec()),
+        SpiTransaction::transaction_end(),
+        // modem config
+        SpiTransaction::transaction_start(),
+        SpiTransaction::write_vec([Register::RegModemConfig3.addr() | 0x80, 0x04].to_vec()),
+        SpiTransaction::transaction_end(),
+        // set mode standby
+        SpiTransaction::transaction_start(),
+        SpiTransaction::transfer([Register::RegModemConfig1.addr(), 0].to_vec(), [0, 0].to_vec()),
+        SpiTransaction::transaction_end(),
+        SpiTransaction::transaction_start(),
+        SpiTransaction::write_vec([Register::RegModemConfig1.addr() | 0x80, 0].to_vec()),
+        SpiTransaction::transaction_end(),
+        SpiTransaction::transaction_start(),
+        SpiTransaction::write_vec([Register::RegOpMode.addr() | 0x80, LongRangeMode.addr() | Stdby.addr()].to_vec()),
+        SpiTransaction::transaction_end(),
+        // clear interrupt
+        SpiTransaction::transaction_start(),
+        SpiTransaction::transfer([Register::RegDioMapping1.addr(), 0].to_vec(), [0, 0b0011_0101].to_vec()),
+        SpiTransaction::transaction_end(),
+        SpiTransaction::transaction_start(),
+        SpiTransaction::write_vec([Register::RegDioMapping1.addr() | 0x80, 0b0111_0101].to_vec()),
+        SpiTransaction::transaction_end(),
+    ]);
+    let mut reset_pin = PinMock::new(&[
+        PinTransaction::set(PinState::Low),
+        PinTransaction::set(PinState::High),
+    ]);
+    let mut lora = LoRa::new(&mut spi, &mut reset_pin, 915).unwrap();
+    match lora.enable_interrupt(Interrupt::TxDone) {
+        Ok(_) => {},
+        Err(e) => core::panic!("Error: {:?}", e),
+    }
+    reset_pin.done();
+    spi.done();
 }
 
 #[test]
 fn new_ok() {
-    let mut spi = SpiMock::new(&setup());
+    let mut spi = SpiMock::new(&[
+        // reset
+        SpiTransaction::transaction_start(),
+        SpiTransaction::delay(10_000_000),
+        SpiTransaction::transaction_end(),
+        SpiTransaction::transaction_start(),
+        SpiTransaction::delay(10_000_000),
+        SpiTransaction::transaction_end(),
+        // version check
+        SpiTransaction::transaction_start(),
+        SpiTransaction::transfer([Register::RegVersion.addr(), 0].to_vec(), [0, 0x12].to_vec()),
+        SpiTransaction::transaction_end(),
+        // set mode sleep
+        SpiTransaction::transaction_start(),
+        SpiTransaction::transfer([Register::RegModemConfig1.addr(), 0].to_vec(), [0, 0].to_vec()),
+        SpiTransaction::transaction_end(),
+        SpiTransaction::transaction_start(),
+        SpiTransaction::write_vec([Register::RegModemConfig1.addr() | 0x80, 0].to_vec()),
+        SpiTransaction::transaction_end(),
+        SpiTransaction::transaction_start(),
+        SpiTransaction::write_vec([Register::RegOpMode.addr() | 0x80, LongRangeMode.addr() | Sleep.addr()].to_vec()),
+        SpiTransaction::transaction_end(),
+        // set frequency
+        SpiTransaction::transaction_start(),
+        SpiTransaction::write_vec([Register::RegFrfMsb.addr() | 0x80, 0xe4].to_vec()),
+        SpiTransaction::transaction_end(),
+        SpiTransaction::transaction_start(),
+        SpiTransaction::write_vec([Register::RegFrfMid.addr() | 0x80, 0xc0].to_vec()),
+        SpiTransaction::transaction_end(),
+        SpiTransaction::transaction_start(),
+        SpiTransaction::write_vec([Register::RegFrfLsb.addr() | 0x80, 0x0].to_vec()),
+        SpiTransaction::transaction_end(),
+        // clear fifo tx
+        SpiTransaction::transaction_start(),
+        SpiTransaction::write_vec([Register::RegFifoTxBaseAddr.addr() | 0x80, 0x0].to_vec()),
+        SpiTransaction::transaction_end(),
+        // clear fifo rx
+        SpiTransaction::transaction_start(),
+        SpiTransaction::write_vec([Register::RegFifoRxBaseAddr.addr() | 0x80, 0x0].to_vec()),
+        SpiTransaction::transaction_end(),
+        // lna
+        SpiTransaction::transaction_start(),
+        SpiTransaction::transfer([Register::RegLna.addr(), 0].to_vec(), [0, 0x20].to_vec()),
+        SpiTransaction::transaction_end(),
+        SpiTransaction::transaction_start(),
+        SpiTransaction::write_vec([Register::RegLna.addr() | 0x80, 0x23].to_vec()),
+        SpiTransaction::transaction_end(),
+        // modem config
+        SpiTransaction::transaction_start(),
+        SpiTransaction::write_vec([Register::RegModemConfig3.addr() | 0x80, 0x04].to_vec()),
+        SpiTransaction::transaction_end(),
+        // set mode standby
+        SpiTransaction::transaction_start(),
+        SpiTransaction::transfer([Register::RegModemConfig1.addr(), 0].to_vec(), [0, 0].to_vec()),
+        SpiTransaction::transaction_end(),
+        SpiTransaction::transaction_start(),
+        SpiTransaction::write_vec([Register::RegModemConfig1.addr() | 0x80, 0].to_vec()),
+        SpiTransaction::transaction_end(),
+        SpiTransaction::transaction_start(),
+        SpiTransaction::write_vec([Register::RegOpMode.addr() | 0x80, LongRangeMode.addr() | Stdby.addr()].to_vec()),
+        SpiTransaction::transaction_end(),
+        ]);
     let mut reset_pin = PinMock::new(&[
         PinTransaction::set(PinState::Low),
         PinTransaction::set(PinState::High),

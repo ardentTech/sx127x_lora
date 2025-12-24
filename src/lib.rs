@@ -91,7 +91,7 @@ where
         }
     }
 
-    /// Lets owner of the driver struct to reconfigure the radio.  Takes care of resetting the
+    /// Lets owner of the driver struct to reconfigure the radio. Takes care of resetting the
     /// chip, putting it into a sleep mode and pulling CS high - thought he caller has to put if
     /// back to some of the active modes himself
     pub fn configure<F>(
@@ -137,7 +137,6 @@ where
         }
     }
 
-    // TODO test
     /// Resets the chip.
     pub fn reset(&mut self) -> Result<(), Sx127xError<SPI::Error, <RESET as ErrorType>::Error>> {
         self.reset.set_low().map_err(Reset)?;
@@ -147,7 +146,6 @@ where
         Ok(())
     }
 
-    // TODO test
     /// Clears an interrupt.
     pub fn clear_interrupt(&mut self, interrupt: Interrupt) -> Result<(), Sx127xError<SPI::Error, <RESET as ErrorType>::Error>> {
         let reg_val = self.read_register(Register::RegIrqFlags.addr())?;
@@ -155,8 +153,7 @@ where
         Ok(())
     }
 
-    // TODO test
-    /// Enables an interrupt.
+    /// Enables an interrupt. All interrupts are unmasked by default after reset.
     pub fn enable_interrupt(&mut self, interrupt: Interrupt) -> Result<(), Sx127xError<SPI::Error, <RESET as ErrorType>::Error>> {
         let mut reg_val = self.read_register(Register::RegDioMapping1.addr())?;
         reg_val = reg_val & !interrupt.mask() | (interrupt as u8) & interrupt.mask();
