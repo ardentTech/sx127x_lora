@@ -48,16 +48,18 @@ pub enum PaConfig {
 
 #[derive(Clone, Copy)]
 pub enum Interrupt {
+    RxDone = 0x0,
     TxDone = 0x40,
 }
 impl Interrupt {
 
     pub fn flag(self) -> u8 {
         match self {
+            Interrupt::RxDone => 0x40,
             Interrupt::TxDone => 0x08
         }
     }
-    
+
     pub fn mask(self) -> u8 {
         0xc0 // only supporting DIO0 for now
     }
