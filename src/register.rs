@@ -47,20 +47,19 @@ pub enum PaConfig {
 }
 
 #[derive(Clone, Copy)]
-pub enum IRQ {
-    IrqTxDoneMask = 0x08,
-    IrqPayloadCrcErrorMask = 0x20,
-    IrqRxDoneMask = 0x40,
-}
-
-#[derive(Clone, Copy)]
 pub enum Interrupt {
-    //RxDone,
     TxDone = 0x40,
 }
+impl Interrupt {
 
-pub enum DioMask {
-    Dio0 = 0xc0,
+    pub fn flag(self) -> u8 {
+        match self {
+            Interrupt::TxDone => 0x08
+        }
+    }
+    pub fn mask(self) -> u8 {
+        0xc0 // only supporting DIO0 for now
+    }
 }
 
 impl Register {
@@ -70,12 +69,6 @@ impl Register {
 }
 
 impl PaConfig {
-    pub fn addr(self) -> u8 {
-        self as u8
-    }
-}
-
-impl IRQ {
     pub fn addr(self) -> u8 {
         self as u8
     }

@@ -117,7 +117,7 @@ fn main() -> ! {
             Ok(_) => {}
             Err(_) => led.set_high().unwrap()
         }
-        timer.delay_ms(5000);
+        timer.delay_ms(3000);
     }
 }
 

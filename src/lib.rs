@@ -18,7 +18,6 @@ use embedded_hal::spi::{Mode, Operation, Phase, Polarity, SpiDevice};
 mod register;
 use self::register::PaConfig;
 use self::register::Register;
-use self::register::IRQ;
 pub use self::register::Interrupt;
 
 /// Provides the necessary SPI mode configuration for the radio
@@ -45,8 +44,9 @@ pub enum Sx127xError<SPI, RESET> {
     Transmitting,
 }
 
-use crate::register::{DioMask, FskDataModulationShaping, FskRampUpRamDown};
+use crate::register::{FskDataModulationShaping, FskRampUpRamDown};
 use Sx127xError::*;
+use crate::Interrupt::TxDone;
 
 #[cfg(not(feature = "version_0x09"))]
 const VERSION_CHECK: u8 = 0x12;
@@ -146,36 +146,28 @@ where
         Ok(())
     }
 
-    // TODO docu
-    // TODO not happy with so much casting
+    // TODO test
+    /// Clears an interrupt.
     pub fn clear_interrupt(&mut self, interrupt: Interrupt) -> Result<(), Sx127xError<SPI::Error, <RESET as ErrorType>::Error>> {
-        match interrupt {
-            Interrupt::TxDone => {
-                let mut reg_val = self.read_register(Register::RegIrqFlags.addr())?;
-                reg_val &= !(IRQ::IrqTxDoneMask as u8);
-                reg_val |= 0x08 & (IRQ::IrqTxDoneMask as u8); // TODO not happy with 0x08
-                self.write_register(Register::RegIrqFlags.addr(), reg_val)?;
-            }
-        }
+        let mut reg_val = self.read_register(Register::RegIrqFlags.addr())?;
+        reg_val = reg_val | interrupt.flag();
+        self.write_register(Register::RegIrqFlags.addr(), reg_val)?;
         Ok(())
     }
 
-    // TODO docu
+    // TODO test
+    /// Enables an interrupt.
     pub fn enable_interrupt(&mut self, interrupt: Interrupt) -> Result<(), Sx127xError<SPI::Error, <RESET as ErrorType>::Error>> {
-        match interrupt {
-            Interrupt::TxDone => {
-                let mut reg_val = self.read_register(Register::RegDioMapping1.addr())?;
-                reg_val &= !(DioMask::Dio0 as u8);
-                reg_val |= (interrupt as u8) & (DioMask::Dio0 as u8);
-                self.write_register(Register::RegDioMapping1.addr(), reg_val)?;
-            }
-        }
+        let mut reg_val = self.read_register(Register::RegDioMapping1.addr())?;
+        reg_val = reg_val & !interrupt.mask() | (interrupt as u8) & interrupt.mask();
+        self.write_register(Register::RegDioMapping1.addr(), reg_val)?;
         Ok(())
     }
 
-    pub fn set_dio0_tx_done(&mut self) -> Result<(), Sx127xError<SPI::Error, <RESET as ErrorType>::Error>> {
-        self.write_register(Register::RegDioMapping1.addr(), 0b01_00_00_00)
-    }
+    // TODO figure out what to do with this
+    // pub fn set_dio0_tx_done(&mut self) -> Result<(), Sx127xError<SPI::Error, <RESET as ErrorType>::Error>> {
+    //     self.write_register(Register::RegDioMapping1.addr(), 0b01_00_00_00)
+    // }
 
     pub fn transmit_payload(
         &mut self,
@@ -274,14 +266,15 @@ where
         {
             Ok(true)
         } else {
-            if (self.read_register(Register::RegIrqFlags.addr())? & IRQ::IrqTxDoneMask.addr()) == 1
+            if (self.read_register(Register::RegIrqFlags.addr())? & TxDone.flag()) == 1
             {
-                self.write_register(Register::RegIrqFlags.addr(), IRQ::IrqTxDoneMask.addr())?;
+                self.write_register(Register::RegIrqFlags.addr(), TxDone.flag())?;
             }
             Ok(false)
         }
     }
 
+    // TODO figure out what to do with this
     /// Clears the radio's IRQ registers.
     pub fn clear_irq(&mut self) -> Result<(), Sx127xError<SPI::Error, <RESET as ErrorType>::Error>> {
         let irq_flags = self.read_register(Register::RegIrqFlags.addr())?;
