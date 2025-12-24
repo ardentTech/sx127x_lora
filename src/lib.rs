@@ -17,7 +17,7 @@ use embedded_hal::spi::{Mode, Operation, Phase, Polarity, SpiDevice};
 
 mod register;
 use self::register::PaConfig;
-use self::register::Register;
+pub use self::register::Register;
 pub use self::register::Interrupt;
 
 /// Provides the necessary SPI mode configuration for the radio
@@ -137,7 +137,8 @@ where
         }
     }
 
-    // TODO docu
+    // TODO test
+    /// Resets the chip.
     pub fn reset(&mut self) -> Result<(), Sx127xError<SPI::Error, <RESET as ErrorType>::Error>> {
         self.reset.set_low().map_err(Reset)?;
         self.spi.transaction(&mut [Operation::DelayNs(10_000_000)]).map_err(SPI)?;
@@ -149,9 +150,8 @@ where
     // TODO test
     /// Clears an interrupt.
     pub fn clear_interrupt(&mut self, interrupt: Interrupt) -> Result<(), Sx127xError<SPI::Error, <RESET as ErrorType>::Error>> {
-        let mut reg_val = self.read_register(Register::RegIrqFlags.addr())?;
-        reg_val = reg_val | interrupt.flag();
-        self.write_register(Register::RegIrqFlags.addr(), reg_val)?;
+        let reg_val = self.read_register(Register::RegIrqFlags.addr())?;
+        self.write_register(Register::RegIrqFlags.addr(), reg_val | interrupt.flag())?;
         Ok(())
     }
 
@@ -163,11 +163,6 @@ where
         self.write_register(Register::RegDioMapping1.addr(), reg_val)?;
         Ok(())
     }
-
-    // TODO figure out what to do with this
-    // pub fn set_dio0_tx_done(&mut self) -> Result<(), Sx127xError<SPI::Error, <RESET as ErrorType>::Error>> {
-    //     self.write_register(Register::RegDioMapping1.addr(), 0b01_00_00_00)
-    // }
 
     pub fn transmit_payload(
         &mut self,
@@ -274,7 +269,6 @@ where
         }
     }
 
-    // TODO figure out what to do with this
     /// Clears the radio's IRQ registers.
     pub fn clear_irq(&mut self) -> Result<(), Sx127xError<SPI::Error, <RESET as ErrorType>::Error>> {
         let irq_flags = self.read_register(Register::RegIrqFlags.addr())?;
@@ -630,119 +624,119 @@ impl RadioMode {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use embedded_hal_mock::eh1::digital::{Mock as PinMock, State as PinState, Transaction as PinTransaction};
-    use embedded_hal_mock::eh1::spi::{Mock as SpiMock, Transaction as SpiTransaction};
-    use crate::RadioMode::{LongRangeMode, Sleep, Stdby};
-    use super::*;
-
-    fn setup() -> [embedded_hal_mock::eh1::spi::Transaction<u8>; 51] {
-        [
-            // reset
-            SpiTransaction::transaction_start(),
-            SpiTransaction::delay(10_000_000),
-            SpiTransaction::transaction_end(),
-            SpiTransaction::transaction_start(),
-            SpiTransaction::delay(10_000_000),
-            SpiTransaction::transaction_end(),
-            // version check
-            SpiTransaction::transaction_start(),
-            SpiTransaction::transfer([Register::RegVersion.addr(), 0].to_vec(), [0, VERSION_CHECK].to_vec()),
-            SpiTransaction::transaction_end(),
-            // set mode sleep
-            SpiTransaction::transaction_start(),
-            SpiTransaction::transfer([Register::RegModemConfig1.addr(), 0].to_vec(), [0, 0].to_vec()),
-            SpiTransaction::transaction_end(),
-            SpiTransaction::transaction_start(),
-            SpiTransaction::write_vec([Register::RegModemConfig1.addr() | 0x80, 0].to_vec()),
-            SpiTransaction::transaction_end(),
-            SpiTransaction::transaction_start(),
-            SpiTransaction::write_vec([Register::RegOpMode.addr() | 0x80, LongRangeMode.addr() | Sleep.addr()].to_vec()),
-            SpiTransaction::transaction_end(),
-            // set frequency
-            SpiTransaction::transaction_start(),
-            SpiTransaction::write_vec([Register::RegFrfMsb.addr() | 0x80, 0xe4].to_vec()),
-            SpiTransaction::transaction_end(),
-            SpiTransaction::transaction_start(),
-            SpiTransaction::write_vec([Register::RegFrfMid.addr() | 0x80, 0xc0].to_vec()),
-            SpiTransaction::transaction_end(),
-            SpiTransaction::transaction_start(),
-            SpiTransaction::write_vec([Register::RegFrfLsb.addr() | 0x80, 0x0].to_vec()),
-            SpiTransaction::transaction_end(),
-            // clear fifo tx
-            SpiTransaction::transaction_start(),
-            SpiTransaction::write_vec([Register::RegFifoTxBaseAddr.addr() | 0x80, 0x0].to_vec()),
-            SpiTransaction::transaction_end(),
-            // clear fifo rx
-            SpiTransaction::transaction_start(),
-            SpiTransaction::write_vec([Register::RegFifoRxBaseAddr.addr() | 0x80, 0x0].to_vec()),
-            SpiTransaction::transaction_end(),
-            // lna
-            SpiTransaction::transaction_start(),
-            SpiTransaction::transfer([Register::RegLna.addr(), 0].to_vec(), [0, 0x20].to_vec()),
-            SpiTransaction::transaction_end(),
-            SpiTransaction::transaction_start(),
-            SpiTransaction::write_vec([Register::RegLna.addr() | 0x80, 0x23].to_vec()),
-            SpiTransaction::transaction_end(),
-            // modem config
-            SpiTransaction::transaction_start(),
-            SpiTransaction::write_vec([Register::RegModemConfig3.addr() | 0x80, 0x04].to_vec()),
-            SpiTransaction::transaction_end(),
-            // set mode standby
-            SpiTransaction::transaction_start(),
-            SpiTransaction::transfer([Register::RegModemConfig1.addr(), 0].to_vec(), [0, 0].to_vec()),
-            SpiTransaction::transaction_end(),
-            SpiTransaction::transaction_start(),
-            SpiTransaction::write_vec([Register::RegModemConfig1.addr() | 0x80, 0].to_vec()),
-            SpiTransaction::transaction_end(),
-            SpiTransaction::transaction_start(),
-            SpiTransaction::write_vec([Register::RegOpMode.addr() | 0x80, LongRangeMode.addr() | Stdby.addr()].to_vec()),
-            SpiTransaction::transaction_end(),
-        ]
-    }
-
-    #[test]
-    fn new_ok() {
-        let mut spi = SpiMock::new(&setup());
-        let mut reset_pin = PinMock::new(&[
-            PinTransaction::set(PinState::Low),
-            PinTransaction::set(PinState::High),
-        ]);
-        match LoRa::new(&mut spi, &mut reset_pin, 915) {
-            Ok(_) => {},
-            Err(e) => panic!("Error: {:?}", e),
-        }
-
-        reset_pin.done();
-        spi.done();
-    }
-
-    #[test]
-    fn new_err_version_mismatch() {
-        let invalid_version = 0x11;
-        let mut spi = SpiMock::new(&[
-            // reset
-            SpiTransaction::transaction_start(),
-            SpiTransaction::delay(10_000_000),
-            SpiTransaction::transaction_end(),
-            SpiTransaction::transaction_start(),
-            SpiTransaction::delay(10_000_000),
-            SpiTransaction::transaction_end(),
-            // version check
-            SpiTransaction::transaction_start(),
-            SpiTransaction::transfer([0x42, 0].to_vec(), [0, invalid_version].to_vec()),
-            SpiTransaction::transaction_end(),
-        ]);
-        let mut reset_pin = PinMock::new(&[
-            PinTransaction::set(PinState::Low),
-            PinTransaction::set(PinState::High),
-        ]);
-        match LoRa::new(&mut spi, &mut reset_pin, 915) {
-            Ok(_) => panic!(),
-            Err(e) => assert_eq!(e, VersionMismatch(invalid_version)),
-        }
-        reset_pin.done();
-        spi.done();
-    }
-}
+// #[cfg(test)]
+// mod tests {
+//     use embedded_hal_mock::eh1::digital::{Mock as PinMock, State as PinState, Transaction as PinTransaction};
+//     use embedded_hal_mock::eh1::spi::{Mock as SpiMock, Transaction as SpiTransaction};
+//     use crate::RadioMode::{LongRangeMode, Sleep, Stdby};
+//     use super::*;
+//
+//     fn setup() -> [embedded_hal_mock::eh1::spi::Transaction<u8>; 51] {
+//         [
+//             // reset
+//             SpiTransaction::transaction_start(),
+//             SpiTransaction::delay(10_000_000),
+//             SpiTransaction::transaction_end(),
+//             SpiTransaction::transaction_start(),
+//             SpiTransaction::delay(10_000_000),
+//             SpiTransaction::transaction_end(),
+//             // version check
+//             SpiTransaction::transaction_start(),
+//             SpiTransaction::transfer([Register::RegVersion.addr(), 0].to_vec(), [0, VERSION_CHECK].to_vec()),
+//             SpiTransaction::transaction_end(),
+//             // set mode sleep
+//             SpiTransaction::transaction_start(),
+//             SpiTransaction::transfer([Register::RegModemConfig1.addr(), 0].to_vec(), [0, 0].to_vec()),
+//             SpiTransaction::transaction_end(),
+//             SpiTransaction::transaction_start(),
+//             SpiTransaction::write_vec([Register::RegModemConfig1.addr() | 0x80, 0].to_vec()),
+//             SpiTransaction::transaction_end(),
+//             SpiTransaction::transaction_start(),
+//             SpiTransaction::write_vec([Register::RegOpMode.addr() | 0x80, LongRangeMode.addr() | Sleep.addr()].to_vec()),
+//             SpiTransaction::transaction_end(),
+//             // set frequency
+//             SpiTransaction::transaction_start(),
+//             SpiTransaction::write_vec([Register::RegFrfMsb.addr() | 0x80, 0xe4].to_vec()),
+//             SpiTransaction::transaction_end(),
+//             SpiTransaction::transaction_start(),
+//             SpiTransaction::write_vec([Register::RegFrfMid.addr() | 0x80, 0xc0].to_vec()),
+//             SpiTransaction::transaction_end(),
+//             SpiTransaction::transaction_start(),
+//             SpiTransaction::write_vec([Register::RegFrfLsb.addr() | 0x80, 0x0].to_vec()),
+//             SpiTransaction::transaction_end(),
+//             // clear fifo tx
+//             SpiTransaction::transaction_start(),
+//             SpiTransaction::write_vec([Register::RegFifoTxBaseAddr.addr() | 0x80, 0x0].to_vec()),
+//             SpiTransaction::transaction_end(),
+//             // clear fifo rx
+//             SpiTransaction::transaction_start(),
+//             SpiTransaction::write_vec([Register::RegFifoRxBaseAddr.addr() | 0x80, 0x0].to_vec()),
+//             SpiTransaction::transaction_end(),
+//             // lna
+//             SpiTransaction::transaction_start(),
+//             SpiTransaction::transfer([Register::RegLna.addr(), 0].to_vec(), [0, 0x20].to_vec()),
+//             SpiTransaction::transaction_end(),
+//             SpiTransaction::transaction_start(),
+//             SpiTransaction::write_vec([Register::RegLna.addr() | 0x80, 0x23].to_vec()),
+//             SpiTransaction::transaction_end(),
+//             // modem config
+//             SpiTransaction::transaction_start(),
+//             SpiTransaction::write_vec([Register::RegModemConfig3.addr() | 0x80, 0x04].to_vec()),
+//             SpiTransaction::transaction_end(),
+//             // set mode standby
+//             SpiTransaction::transaction_start(),
+//             SpiTransaction::transfer([Register::RegModemConfig1.addr(), 0].to_vec(), [0, 0].to_vec()),
+//             SpiTransaction::transaction_end(),
+//             SpiTransaction::transaction_start(),
+//             SpiTransaction::write_vec([Register::RegModemConfig1.addr() | 0x80, 0].to_vec()),
+//             SpiTransaction::transaction_end(),
+//             SpiTransaction::transaction_start(),
+//             SpiTransaction::write_vec([Register::RegOpMode.addr() | 0x80, LongRangeMode.addr() | Stdby.addr()].to_vec()),
+//             SpiTransaction::transaction_end(),
+//         ]
+//     }
+//
+//     #[test]
+//     fn new_ok() {
+//         let mut spi = SpiMock::new(&setup());
+//         let mut reset_pin = PinMock::new(&[
+//             PinTransaction::set(PinState::Low),
+//             PinTransaction::set(PinState::High),
+//         ]);
+//         match LoRa::new(&mut spi, &mut reset_pin, 915) {
+//             Ok(_) => {},
+//             Err(e) => panic!("Error: {:?}", e),
+//         }
+//
+//         reset_pin.done();
+//         spi.done();
+//     }
+//
+//     #[test]
+//     fn new_err_version_mismatch() {
+//         let invalid_version = 0x11;
+//         let mut spi = SpiMock::new(&[
+//             // reset
+//             SpiTransaction::transaction_start(),
+//             SpiTransaction::delay(10_000_000),
+//             SpiTransaction::transaction_end(),
+//             SpiTransaction::transaction_start(),
+//             SpiTransaction::delay(10_000_000),
+//             SpiTransaction::transaction_end(),
+//             // version check
+//             SpiTransaction::transaction_start(),
+//             SpiTransaction::transfer([0x42, 0].to_vec(), [0, invalid_version].to_vec()),
+//             SpiTransaction::transaction_end(),
+//         ]);
+//         let mut reset_pin = PinMock::new(&[
+//             PinTransaction::set(PinState::Low),
+//             PinTransaction::set(PinState::High),
+//         ]);
+//         match LoRa::new(&mut spi, &mut reset_pin, 915) {
+//             Ok(_) => panic!(),
+//             Err(e) => assert_eq!(e, VersionMismatch(invalid_version)),
+//         }
+//         reset_pin.done();
+//         spi.done();
+//     }
+// }

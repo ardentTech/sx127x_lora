@@ -57,6 +57,7 @@ impl Interrupt {
             Interrupt::TxDone => 0x08
         }
     }
+    
     pub fn mask(self) -> u8 {
         0xc0 // only supporting DIO0 for now
     }
