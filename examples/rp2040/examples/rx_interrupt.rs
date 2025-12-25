@@ -1,7 +1,7 @@
-//! Transmit packets using the LoRa 1276 module on the Adafruit Feather RP2040 RFM95 board
+//! Receive packets using the LoRa 1276 module on the Adafruit Feather RP2040 RFM95 board.
 //!
-//! This will trigger the TxDone interrupt on DIO0 if transmission was successful and blink the
-//! on-board LED. On error, the on-board LED will be turned on.
+//! This will trigger the RxDone interrupt on DIO0 if successful and blink the on-board LED. On
+//! error, the on-board LED will be turned on.
 
 #![no_std]
 #![no_main]
@@ -9,22 +9,23 @@
 extern crate sx127x_lora;
 
 use core::cell::RefCell;
+use core::convert::Infallible;
 use core::sync::atomic::{AtomicBool, Ordering};
 use cortex_m::asm::wfi;
 use critical_section::Mutex;
 use embedded_hal::delay::DelayNs;
 use embedded_hal::digital::{OutputPin, PinState};
-use embedded_hal_bus::spi::RefCellDevice;
+use embedded_hal_bus::spi::{DeviceError, RefCellDevice};
 use panic_halt as _;
 use rp2040_hal as hal;
 use rp2040_hal::clocks::init_clocks_and_plls;
 use rp2040_hal::fugit::RateExtU32;
-use rp2040_hal::gpio::{FunctionSioInput, FunctionSioOutput, Pin, Pins, PullDown, PullUp};
+use rp2040_hal::gpio::{Error, FunctionSioInput, FunctionSioOutput, Pin, Pins, PullDown, PullUp};
 use rp2040_hal::{Sio, Timer, Watchdog, pac, Clock};
 use rp2040_hal::gpio::bank0::Gpio21;
 use rp2040_hal::gpio::Interrupt::EdgeHigh;
 use rp2040_hal::pac::interrupt;
-use sx127x_lora::Interrupt;
+use sx127x_lora::{Interrupt, RadioMode, Sx127xError};
 
 /// The linker will place this boot block at the start of our program image. We
 /// need this to help the ROM bootloader get our code up and running.
@@ -79,47 +80,41 @@ fn main() -> ! {
     let spi_bus = RefCell::new(spi);
 
     let mut led: Pin<_, FunctionSioOutput, PullDown> = pins.gpio13.reconfigure();
-
     let nss = pins.gpio16.into_push_pull_output_in_state(PinState::High);
     let reset = pins.gpio17.into_push_pull_output_in_state(PinState::High);
 
     let spi_device = RefCellDevice::new(&spi_bus, nss, timer).unwrap();
     let mut lora = sx127x_lora::LoRa::new(spi_device, reset, LORA_FREQUENCY_MHZ).unwrap();
-    lora.enable_interrupt(Interrupt::TxDone).unwrap();
 
     let dio0: Pin<Gpio21, FunctionSioInput, PullDown> = pins.gpio21.reconfigure();
     dio0.set_interrupt_enabled(EdgeHigh, true);
-
-    let message = "hello, world!";
-    let mut buffer = [0;255];
-    for (i,c) in message.chars().enumerate() {
-        buffer[i] = c as u8;
-    }
 
     critical_section::with(|cs| {
         DIO0.borrow(cs).replace(Some(dio0));
     });
 
+    lora.enable_interrupt(Interrupt::RxDone).unwrap();
+    lora.set_mode(RadioMode::RxContinuous).unwrap();
     unsafe {
         pac::NVIC::unmask(pac::Interrupt::IO_IRQ_BANK0);
     }
 
     loop {
-        wfi();
         if DIO0_FLAG.load(Ordering::Relaxed) {
+            lora.clear_interrupt(Interrupt::RxDone).unwrap();
+            match lora.new_read() {
+                Ok(_) => {
+                    led.set_high().unwrap();
+                    timer.delay_ms(500);
+                    led.set_low().unwrap();
+                    timer.delay_ms(500);
+                }
+                Err(_) => led.set_high().unwrap()
+            }
             DIO0_FLAG.store(false, Ordering::Relaxed);
-            lora.clear_interrupt(Interrupt::TxDone).unwrap();
-            led.set_high().unwrap();
-            timer.delay_ms(500);
-            led.set_low().unwrap();
-            timer.delay_ms(500);
         }
 
-        match lora.transmit_payload(&buffer) {
-            Ok(_) => {}
-            Err(_) => led.set_high().unwrap()
-        }
-        timer.delay_ms(3000);
+        wfi();
     }
 }
 

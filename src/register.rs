@@ -19,6 +19,7 @@ pub enum Register {
     RegRxNbBytes = 0x13,
     RegPktSnrValue = 0x19,
     RegPktRssiValue = 0x1a,
+    RegHopChannel = 0x1c,
     RegModemConfig1 = 0x1d,
     RegModemConfig2 = 0x1e,
     RegPreambleMsb = 0x20,
@@ -62,6 +63,10 @@ impl Interrupt {
 
     pub fn mask(self) -> u8 {
         0xc0 // only supporting DIO0 for now
+    }
+    
+    pub fn reg_addr(self) -> u8 {
+        Register::RegDioMapping1.addr() // only supporting DIO0 for now
     }
 }
 

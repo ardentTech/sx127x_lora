@@ -42,6 +42,7 @@ pub enum Sx127xError<SPI, RESET> {
     Reset(RESET),
     SPI(SPI),
     Transmitting,
+    Receiving,
 }
 
 use crate::register::{FskDataModulationShaping, FskRampUpRamDown};
@@ -155,9 +156,9 @@ where
 
     /// Enables an interrupt. All interrupts are unmasked by default after reset.
     pub fn enable_interrupt(&mut self, interrupt: Interrupt) -> Result<(), Sx127xError<SPI::Error, <RESET as ErrorType>::Error>> {
-        let mut reg_val = self.read_register(Register::RegDioMapping1.addr())?;
+        let mut reg_val = self.read_register(interrupt.reg_addr())?;
         reg_val = reg_val & !interrupt.mask() | (interrupt as u8) & interrupt.mask();
-        self.write_register(Register::RegDioMapping1.addr(), reg_val)?;
+        self.write_register(interrupt.reg_addr(), reg_val)?;
         Ok(())
     }
 
@@ -228,11 +229,25 @@ where
         }
     }
 
+    pub fn new_read(&mut self) -> Result<[u8; 255], Sx127xError<SPI::Error, <RESET as ErrorType>::Error>> {
+        let reg_hop_channel = self.read_register(Register::RegHopChannel.addr())?;
+        if (reg_hop_channel >> 6 & 0x1) == 1 {
+            // In order to retrieve received data from FIFO the user must ensure that ValidHeader(4), PayloadCrcError(5), RxDone(6) and
+            // RxTimeout(7) interrupts in the status register RegIrqFlags are not asserted to ensure that packet reception has terminated
+            // successfully (i.e. no flags should be set).
+            let reg_irq_flags = self.read_register(Register::RegIrqFlags.addr())?;
+            if (reg_irq_flags >> 4) & 0xf != 0x0 {
+                return Err(Receiving)
+            }
+        }
+        self.read_packet()
+    }
+
     /// Returns the contents of the fifo as a fixed 255 u8 array. This should only be called if there is a
     /// new packet ready to be read.
     pub fn read_packet(&mut self) -> Result<[u8; 255], Sx127xError<SPI::Error, <RESET as ErrorType>::Error>> {
         let mut buffer = [0u8; 255];
-        self.clear_irq()?;
+        //self.clear_irq()?;
         let size = self.get_ready_packet_size()?;
         let fifo_addr = self.read_register(Register::RegFifoRxCurrentAddr.addr())?;
         self.write_register(Register::RegFifoAddrPtr.addr(), fifo_addr)?;
