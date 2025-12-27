@@ -20,6 +20,7 @@ use rp2040_hal::sio::SioFifo;
 use usb_device::class_prelude::UsbBusAllocator;
 use usb_device::prelude::*;
 use usbd_serial::{SerialPort, USB_CLASS_CDC};
+use sx127x_lora::Sx127xError;
 
 /// The linker will place this boot block at the start of our program image. We
 /// need this to help the ROM bootloader get our code up and running.
@@ -41,8 +42,14 @@ static CORE1_STACK: Stack<4096> = Stack::new();
 
 const XOSC_CRYSTAL_FREQ_HZ: u32 = 12_000_000;
 const LORA_FREQUENCY_MHZ: i64 = 915;
-const TX_OK: u32 = 0x0;
-const TX_ERR: u32 = 0x1;
+const RX_OK: u32 = 0x0;
+const RX_ERR_UNINFORMATIVE: u32 = 0x1;
+const RX_ERR_VERSION_MISMATCH: u32 = 0x2;
+const RX_ERR_RESET: u32 = 0x3;
+const RX_ERR_SPI: u32 = 0x4;
+const RX_ERR_TRANSMITTING: u32 = 0x5;
+const RX_ERR_RECEIVING: u32 = 0x6;
+const RX_PACKET_NOT_READY: u32 = 0x7;
 
 static SIO_FIFO: Mutex<RefCell<Option<SioFifo>>> = Mutex::new(RefCell::new(None));
 
@@ -86,11 +93,18 @@ fn core1_task(_sys_freq: u32) -> ! {
         }
         match sio.fifo.read() {
             Some(word) => {
-                match word {
-                    TX_OK => { serial.write("LoRa TX OK\r\n".as_bytes()).unwrap(); },
-                    TX_ERR => { serial.write("LoRa TX Err\r\n".as_bytes()).unwrap(); },
-                    _ => { serial.write("Unexpected msg\r\n".as_bytes()).unwrap(); },
-                }
+                let msg = match word {
+                    RX_OK => "LoRa RX OK\r\n",
+                    RX_ERR_UNINFORMATIVE => "LoRa RX Err: Uninformative\r\n",
+                    RX_ERR_VERSION_MISMATCH => "LoRa RX Err: Version Mistmatch\r\n",
+                    RX_ERR_RESET => "LoRa RX Err: Reset\r\n",
+                    RX_ERR_SPI => "LoRa RX Err: SPI\r\n",
+                    RX_ERR_TRANSMITTING => "LoRa RX Err: Transmitting\r\n",
+                    RX_ERR_RECEIVING => "LoRa RX Err: Receiving\r\n",
+                    RX_PACKET_NOT_READY => "LoRa RX: packet not ready\r\n",
+                    _ => "Unexpected msg\r\n",
+                };
+                serial.write(msg.as_bytes()).unwrap();
             },
             None => continue,
         }
@@ -165,16 +179,17 @@ fn main() -> ! {
     let spi_device = RefCellDevice::new(&spi_bus, nss, timer).unwrap();
     let mut lora = sx127x_lora::LoRa::new(spi_device, reset, LORA_FREQUENCY_MHZ).unwrap();
 
-    let message = "hello, world!";
-    let mut buffer = [0;255];
-    for (i,c) in message.chars().enumerate() {
-        buffer[i] = c as u8;
-    }
-
     loop {
-        let msg = match lora.transmit_payload(&buffer) {
-            Ok(_) => TX_OK,
-            Err(_) => TX_ERR
+        let msg = match lora.poll_irq(Some(30)) { // 30 millisecond timeout
+            Ok(_) => RX_OK,
+            Err(e) => match e {
+                Sx127xError::Uninformative => RX_PACKET_NOT_READY,
+                Sx127xError::VersionMismatch(_) => RX_ERR_VERSION_MISMATCH,
+                Sx127xError::Reset(_) => RX_ERR_RESET,
+                Sx127xError::SPI(_) => RX_ERR_SPI,
+                Sx127xError::Transmitting => RX_ERR_TRANSMITTING,
+                Sx127xError::Receiving => RX_ERR_RECEIVING,
+            },
         };
         critical_section::with(|cs| {
             let mut maybe_sio_fifo = SIO_FIFO.borrow_ref_mut(cs);
@@ -182,6 +197,6 @@ fn main() -> ! {
                 sio_fifo.write(msg);
             }
         });
-        timer.delay_ms(3_000);
+        timer.delay_ms(250);
     }
 }

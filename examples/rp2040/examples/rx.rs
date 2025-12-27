@@ -16,7 +16,7 @@ use panic_halt as _;
 use rp2040_hal as hal;
 use rp2040_hal::clocks::init_clocks_and_plls;
 use rp2040_hal::fugit::RateExtU32;
-use rp2040_hal::gpio::{FunctionSioOutput, Pin, Pins, PullDown};
+use rp2040_hal::gpio::{FunctionSioOutput, Pin, Pins, PullDown, PullNone};
 use rp2040_hal::{Sio, Timer, Watchdog, pac, Clock};
 
 /// The linker will place this boot block at the start of our program image. We
@@ -66,7 +66,7 @@ fn main() -> ! {
     );
     let spi_bus = RefCell::new(spi);
 
-    let mut led: Pin<_, FunctionSioOutput, PullDown> = pins.gpio13.reconfigure();
+    let mut led: Pin<_, FunctionSioOutput, PullNone> = pins.gpio13.reconfigure();
 
     let nss = pins.gpio16.into_push_pull_output_in_state(PinState::High);
     let reset = pins.gpio17.into_push_pull_output_in_state(PinState::High);
