@@ -155,9 +155,10 @@ where
 
     /// Enables an interrupt.
     pub fn enable_interrupt(&mut self, interrupt: Interrupt) -> Result<(), Sx127xError<SPI::Error, <RESET as ErrorType>::Error>> {
-        let mut reg_val = self.read_register(interrupt.reg_addr())?;
-        reg_val = reg_val & !interrupt.mask() | (interrupt as u8) & interrupt.mask();
-        self.write_register(interrupt.reg_addr(), reg_val)?;
+        let mut reg_val = self.read_register(interrupt.dio_mapping_addr())?;
+        reg_val &= !interrupt.mask();
+        reg_val |= interrupt.value() & interrupt.mask();
+        self.write_register(interrupt.dio_mapping_addr(), reg_val)?;
         Ok(())
     }
 
@@ -166,6 +167,15 @@ where
         let reg_val = self.read_register(Register::RegIrqFlags.addr())?;
         self.write_register(Register::RegIrqFlags.addr(), reg_val | interrupt.flag())?;
         Ok(())
+    }
+
+    /// Determines whether an interrupt was triggered.
+    fn interrupt_triggered(&mut self, interrupt: Interrupt) -> Result<bool, Sx127xError<SPI::Error, <RESET as ErrorType>::Error>> {
+        if (self.read_register(Register::RegIrqFlags.addr())? & interrupt.flag()) == 1 {
+            Ok(true)
+        } else {
+            Ok(false)
+        }
     }
 
     pub fn transmit_payload(
@@ -280,9 +290,8 @@ where
         {
             Ok(true)
         } else {
-            if (self.read_register(Register::RegIrqFlags.addr())? & Interrupt::TxDone.flag()) == 1
-            {
-                self.write_register(Register::RegIrqFlags.addr(), Interrupt::TxDone.flag())?;
+            if self.interrupt_triggered(Interrupt::TxDone)? {
+                self.clear_interrupt(Interrupt::TxDone)?;
             }
             Ok(false)
         }
